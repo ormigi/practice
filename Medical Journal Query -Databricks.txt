@@ -1,0 +1,203 @@
+-- Databricks notebook source
+-- MAGIC %md #Hive QL Implementation
+
+-- COMMAND ----------
+
+-- MAGIC %md ###Data preparation
+
+-- COMMAND ----------
+
+-- MAGIC %md I have uploaded the data on Databricks, through UI under "Data" icon,then selecting Database Tables, click on Create new table, then selecting source of data the path = s3://ai2-semanticscholar-cord-19/2020-07-01, with 'ai2-semanticscholar-cord-19/2020-07-01' as the S3 bucket name. Preview panel choices I made: infer schema, csv file type, coma delimited file, first row is header and I've changed the table name to suit the requirements,  to metadata_2020_07_01, which is what I used below:
+
+-- COMMAND ----------
+
+/*define a variable, that can store the difft values of metadata files, according to the version*/
+SET mydatatable = metadata_2020_07_01
+
+-- COMMAND ----------
+
+/*table Schema,  ${hiveconf:mydatatable} is  used to set Hive configuration values*/
+DESCRIBE ${hiveconf:mydatatable}
+
+-- COMMAND ----------
+
+/*DETAILS ABOUT THE TABLE, variable type, columns names (19 in number)/
+DESCRIBE FORMATTED ${hiveconf:mydatatable}
+
+-- COMMAND ----------
+
+-- MAGIC %md ##Q1  
+
+-- COMMAND ----------
+
+-- MAGIC %md the 5 most common journals, list them along with their frequencies.
+-- MAGIC Query on mydatatable - excluding those rows where "journal" column contains NULL values, arranging in descending order to get the journal with highest frequency; in HiveQL, mydatatable variable will be retrieved using ${hiveconf:x}
+
+-- COMMAND ----------
+
+SELECT journal, count(*) AS Freq
+FROM ${hiveconf:mydatatable}
+WHERE journal IS NOT NULL
+GROUP BY journal
+ORDER BY Freq DESC
+LIMIT 5
+
+-- COMMAND ----------
+
+-- MAGIC %md   the top 5 average abstract lengths (number of words) per journal.
+
+-- COMMAND ----------
+
+-- MAGIC %md  Interested in two columns: abstract and journal. Firstly, I calculate the abstract length by using the avg function to aggregate the result of 'abstract',by splitting on white spaces, i.e. ' ', and the length of array of words was calculated with 'size';specify that the rows where 'abstract' is NULL should be excluded; the findings are grouped with GROUP BY statement, which lists the number of abstract average lengths in each journal. Sorting with ORDER BY statement from highest to lowest average length per abstract. LIMIT presents the first 5 rows in the result. 
+
+-- COMMAND ----------
+
+SELECT journal, avg(size(split(abstract, ' '))) AS average_length
+FROM ${hiveconf:mydatatable}
+WHERE abstract IS NOT NULL
+GROUP BY journal
+ORDER BY average_length DESC
+LIMIT 5
+
+-- COMMAND ----------
+
+-- MAGIC %md %md   the titles of the 5 papers with the highest numbers of authors. Both the numbers of authors and the
+-- MAGIC corresponding titles need to be output.
+-- MAGIC   For a basic implementation solution, you can restrict your answers to the author fields which
+--   use   separators and thus approximate division into authors by a split.
+
+-- COMMAND ----------
+
+-- MAGIC %md Authors column contains rows where the authors (if many) are separated by ;A splitting based on ';'  will bring out the author fields even when there are two or three authors in the same row,then applying 'size' function to detect how many lengths in authors, sum adds the authors' arrays number;  under each paper title there will be several number of authors - used the GROUP BY ; the result is then ordered from highest to lowest number, with ORDER BY.
+
+-- COMMAND ----------
+
+SELECT title, sum(size(split(authors, ';'))) AS authors_number
+FROM ${hiveconf:mydatatable}
+GROUP BY title
+ORDER BY authors_number DESC
+LIMIT 5
+
+-- COMMAND ----------
+
+-- MAGIC %md  the top 5 most prolific authors along with the number of papers they have contributed to.
+-- MAGIC 
+-- MAGIC 
+-- MAGIC apply explode (---explode() takes in an array (or a map) as an input and outputs the elements of the array (map) as separate rows----) to the authors column, once  the 'authors' have been ';' split; we need to count these authors based on both journal they wrote in and, also, based on each author (as some of the authors could have been writing for different papers). N.B. 'explode' function does not work on an alias column name.
+
+-- COMMAND ----------
+
+/* the explode(spli()) results in a table as below, with one author per journal per each row, the we need to count and group by authors and then by journal*/
+SELECT explode(split(authors, ';')) AS exploded_authors, 
+       journal,
+       count(*) AS count
+FROM ${hiveconf:mydatatable}
+GROUP BY authors, journal
+
+
+
+-- COMMAND ----------
+
+/*from table above, after applying trim()function white spaces in the exploded_authors column, rename this as final_authors, count all final authors, name the column 'count', group by final_authors and arrange in descending order the results from the count column*/,
+SELECT trim(expanded.exploded_authors) AS final_authors, count(*) AS count
+FROM (SELECT explode(split(authors, ';')) AS exploded_authors
+      FROM ${hiveconf:mydatatable}) AS expanded
+GROUP BY final_authors
+ORDER BY count   DESC
+LIMIT 5
+
+-- COMMAND ----------
+
+ 
+SELECT final_authors   
+from (SELECT trim(expanded.exploded_authors) AS final_authors, count(*) AS count
+      FROM (SELECT explode(split(authors, ';')) AS exploded_authors
+          FROM ${hiveconf:mydatatable}) AS expanded
+      GROUP BY final_authors)
+where final_authors like '%39%'
+
+-- COMMAND ----------
+
+-- MAGIC %md  
+-- MAGIC If an author's H index is computed by summing all the H indexes of the journals they've published in (as included in the scimagojr dataset) let us list the 5 people with the top author Hindex values.  Creating views sjr and
+
+-- COMMAND ----------
+
+-- MAGIC %md By joining the two tables can answer the question what is Total H index for each author; we prepare the views to be joined, common columns are 'journal' and 'Title' from sjr
+
+-- COMMAND ----------
+
+CREATE VIEW IF NOT EXISTS sjr AS
+SELECT Title, `H index`
+FROM scimagojr_2019_csv
+
+-- COMMAND ----------
+
+SELECT * FROM sjr
+
+-- COMMAND ----------
+
+/*drop view author_journal*/
+
+-- COMMAND ----------
+
+CREATE VIEW IF NOT EXISTS author_journal AS
+SELECT trim(expanded.exploded_authors), expanded.journal
+FROM (SELECT journal, explode(split(authors, ';')) AS exploded_authors
+      FROM ${hiveconf:mydatatable}) AS expanded
+
+-- COMMAND ----------
+
+desc author_journal
+
+-- COMMAND ----------
+
+select `trim(exploded_authors)`
+from  author_journal
+where `trim(exploded_authors)` like '*039*'
+
+-- COMMAND ----------
+
+CREATE VIEW IF NOT EXISTS sjr AS
+SELECT Title, `H index`
+FROM scimagojr_2019_csv
+
+-- COMMAND ----------
+
+/* there is a need to join the two tables to be able to answer the question Total H index for each author, we firstly prepare the tables to be joined*/
+SELECT author_journal.`trim(exploded_authors)`, sum(sjr.`H index`)  AS TotalH
+FROM sjr
+JOIN author_journal 
+ON (author_journal.journal = sjr.Title)
+GROUP BY `trim(exploded_authors)`
+ORDER BY TotalH DESC
+LIMIT 5
+
+
+-- COMMAND ----------
+
+SELECT author_journal.`trim(exploded_authors)`, sum(sjr.`H index`) AS TotalH
+FROM sjr
+JOIN author_journal
+ON (author_journal.journal = sjr.Title)
+GROUP BY `trim(exploded_authors)`
+ORDER BY TotalH DESC
+LIMIT 5
+
+-- COMMAND ----------
+
+-- MAGIC %md   Plotting the number of papers per month since 2020-01. Included a visualization as well.
+-- MAGIC as a table of the values you have plotted for each month.  number of papers/month, since 2020-01 visualization + table with monthly plotted values
+
+-- COMMAND ----------
+
+SELECT LEFT(publish_time, 7) AS year_month, count(*)
+FROM ${hiveconf:mydatatable}
+WHERE publish_time LIKE '2020-%'
+GROUP BY year_month
+ORDER BY year_month
+
+
+-- COMMAND ----------
+
+/*%md Created an external table to store the query results and insert data into the table, with the option to drop this table later, (this erases the table but not the file, since it is an external table ) The idea is to represent it graphically, based on the file obtained. */
