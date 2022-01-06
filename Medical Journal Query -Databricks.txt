@@ -201,3 +201,8 @@ ORDER BY year_month
 -- COMMAND ----------
 
 /*%md Created an external table to store the query results and insert data into the table, with the option to drop this table later, (this erases the table but not the file, since it is an external table ) The idea is to represent it graphically, based on the file obtained. */
+
+
+
+
+/*%md Thank you, University of Salford, UK and the Databricks Community Edition, who have offered their teaching, support and software.*/
