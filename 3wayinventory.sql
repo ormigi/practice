@@ -48,6 +48,8 @@ VALUES
 
 /*/run the query to perform the three-way matching between the purchase_orders, goods_received, and vendor_invoices tables.
  This query compares the quantities and prices from the three sources and returns whether they match.*/
+ 
+ CREATE TABLE final_inventory_comparison AS
  SELECT
     po.order_id,
     po.item_id,
@@ -77,7 +79,7 @@ JOIN
 WHERE
     po.order_id IN (1, 2, 3);  -- we can specify which orders to match (or remove the filter to match all orders)
     
-    DROP TABLE IF EXISTS vendor_invoices;
+ /*   
 CREATE TABLE vendor_invoices (
     invoice_id INT AUTO_INCREMENT PRIMARY KEY,
     order_id INT,
@@ -95,6 +97,53 @@ SELECT * FROM vendor_invoices;
 SELECT * FROM purchase_orders;
 SELECT * FROM goods_received;
 SELECT USER();
-SELECT DATABASE();
+SELECT DATABASE(); */
 
+SELECT user, host, authentication_string, plugin FROM mysql.user WHERE user='root';
+
+create table final_inventory_comparison as
+SELECT 
+    po.order_id,
+    po.item_id,
+    po.quantity AS po_qty,
+    gr.quantity AS received_qty,
+    vi.quantity AS invoiced_qty,
+    po.price AS po_price,
+    gr.price AS received_price,
+    vi.price AS invoiced_price,
+    CASE WHEN po.quantity = gr.quantity AND gr.quantity = vi.quantity THEN TRUE ELSE FALSE END AS qty_match,
+    CASE WHEN po.price = gr.price AND gr.price = vi.price THEN TRUE ELSE FALSE END AS price_match,
+    CASE WHEN po.item_id = gr.item_id AND gr.item_id = vi.item_id THEN TRUE ELSE FALSE END AS item_match
+FROM purchase_orders po
+JOIN goods_receipts gr ON po.order_id = gr.order_id AND po.item_id = gr.item_id
+JOIN vendor_invoices vi ON gr.order_id = vi.order_id AND gr.item_id = vi.item_id;
+
+
+CREATE TABLE final_inventory_comparison AS
+SELECT 
+    po.order_id,
+    po.item_id,
+    po.quantity AS po_qty,
+    gr.quantity AS received_qty,
+    vi.quantity AS invoiced_qty,
+    po.price AS po_price,
+    gr.price AS received_price,
+    vi.price AS invoiced_price,
+    CASE 
+        WHEN po.quantity = gr.quantity AND gr.quantity = vi.quantity THEN TRUE 
+        ELSE FALSE 
+    END AS qty_match,
+    CASE 
+        WHEN po.price = gr.price AND gr.price = vi.price THEN TRUE 
+        ELSE FALSE 
+    END AS price_match,
+    CASE 
+        WHEN po.item_id = gr.item_id AND gr.item_id = vi.item_id THEN TRUE 
+        ELSE FALSE 
+    END AS item_match
+FROM purchase_orders po
+JOIN goods_receipts gr 
+    ON po.order_id = gr.order_id AND po.item_id = gr.item_id
+JOIN vendor_invoices vi 
+    ON gr.order_id = vi.order_id AND gr.item_id = vi.item_id;
 
